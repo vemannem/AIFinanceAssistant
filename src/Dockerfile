@@ -23,5 +23,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start the application
-CMD ["python", "src/web_app/main.py"]
+# Start the application using module execution (proper Python package handling)
+CMD ["python", "-m", "src.web_app.main"]
