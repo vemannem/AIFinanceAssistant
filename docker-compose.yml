@@ -1,0 +1,74 @@
+version: '3.9'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-finance-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT:-gcp-starter}
+      - DATABASE_URL=${DATABASE_URL}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend/src:/app/src
+    command: python main.py
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Web Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://backend:8000
+        VITE_WS_URL: ws://backend:8000
+    container_name: ai-finance-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://backend:8000
+      - VITE_WS_URL=ws://backend:8000
+    volumes:
+      - ./frontend/src:/app/src
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - ai-network
+
+networks:
+  ai-network:
+    driver: bridge
+
+# Usage:
+# 1. Create .env file in root with:
+#    OPENAI_API_KEY=sk-...
+#    PINECONE_API_KEY=...
+#    PINECONE_ENVIRONMENT=gcp-starter
+#
+# 2. Run:
+#    docker-compose up
+#
+# 3. Access:
+#    Backend: http://localhost:8000
+#    Frontend: http://localhost:3000
+#
+# 4. View logs:
+#    docker-compose logs -f backend
+#    docker-compose logs -f frontend
+#
+# 5. Stop:
+#    docker-compose down
