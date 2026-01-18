@@ -28,13 +28,13 @@ def main():
     # Run server
     try:
         logger.info(f"Starting FastAPI server on {Config.API_HOST}:{Config.API_PORT}")
+        # Don't use workers parameter with app object - uvicorn requires import string for that
+        # Single threaded mode is fine for Docker/HuggingFace
         uvicorn.run(
             app,
             host=Config.API_HOST,
             port=Config.API_PORT,
-            workers=1,  # Single worker for app object (required for Docker/HuggingFace)
             log_level=Config.LOG_LEVEL.lower(),
-            reload=False,  # Disable reload in production
         )
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
