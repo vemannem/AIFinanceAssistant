@@ -32,8 +32,9 @@ def main():
             app,
             host=Config.API_HOST,
             port=Config.API_PORT,
-            workers=Config.API_WORKERS,
+            workers=1,  # Single worker for app object (required for Docker/HuggingFace)
             log_level=Config.LOG_LEVEL.lower(),
+            reload=False,  # Disable reload in production
         )
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
