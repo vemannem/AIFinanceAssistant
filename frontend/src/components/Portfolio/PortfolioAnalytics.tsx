@@ -1,7 +1,7 @@
 import { FC, useMemo, useEffect, useState } from 'react'
 import { usePortfolioStore } from '../../store/portfolioStore'
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts'
-import axios from 'axios'
+import { orchestrationService } from '../../services/orchestrationService'
 
 interface Holding {
   ticker: string

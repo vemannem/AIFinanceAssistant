@@ -53,14 +53,17 @@ class GoalPlanningAgent(BaseAgent):
     async def execute(
         self,
         user_message: str,
-        goal_data: Optional[Dict[str, Any]] = None
+        conversation_context: Optional[str] = None,
+        query_data: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> AgentOutput:
         """
         Execute goal planning analysis
         
         Args:
             user_message: User's goal planning question
-            goal_data: Dict with:
+            conversation_context: Optional conversation history context
+            query_data: Dict with:
                 - current_value: float (current portfolio/savings)
                 - goal_amount: float (target amount)
                 - time_horizon_years: float (years to reach goal)
@@ -74,9 +77,8 @@ class GoalPlanningAgent(BaseAgent):
         self._log_execution("START", f"goal_planning - {user_message[:50]}")
 
         try:
-            # Parse goal data
-            if not goal_data:
-                goal_data = {}
+            # Parse goal data from query_data
+            goal_data = query_data if query_data else {}
 
             current_value = goal_data.get("current_value", 0)
             goal_amount = goal_data.get("goal_amount", 100000)

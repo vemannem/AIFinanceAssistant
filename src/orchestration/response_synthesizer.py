@@ -46,18 +46,26 @@ class ResponseSynthesizer:
         if isinstance(agent_output, str):
             return agent_output
         
-        # AgentOutput dataclass format
+        # AgentOutput dataclass format - check for answer_text first
+        if hasattr(agent_output, "answer_text"):
+            return str(agent_output.answer_text)
+        
+        # Legacy format check
         if hasattr(agent_output, "response"):
             return str(agent_output.response)
         
-        # Dict with 'response' key
+        # Dict with various possible keys
         if isinstance(agent_output, dict):
+            if "answer_text" in agent_output:
+                return str(agent_output["answer_text"])
             if "response" in agent_output:
                 return str(agent_output["response"])
             if "output" in agent_output:
                 return str(agent_output["output"])
             if "text" in agent_output:
                 return str(agent_output["text"])
+            if "answer" in agent_output:
+                return str(agent_output["answer"])
         
         # Fallback: convert to string
         return str(agent_output)

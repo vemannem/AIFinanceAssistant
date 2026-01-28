@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { agentsService } from '@/services/agentsService';
+import { orchestrationService } from '@/services/orchestrationService';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useLangGraphStore } from '@/store/langgraphStore';
-import { ExecutionMetrics } from '@/types';
 
 export function GoalPlanningView() {
   const settingsStore = useSettingsStore();
@@ -24,7 +23,7 @@ export function GoalPlanningView() {
     try {
       setLoading(true);
       setError(null);
-      langgraphStore.setLoading(true);  // Set LangGraph store loading state
+      langgraphStore.setLoading(true);
 
       const current = parseFloat(currentValue);
       const goal = parseFloat(goalAmount);
@@ -41,28 +40,26 @@ export function GoalPlanningView() {
         return;
       }
 
-      const result = await agentsService.planGoals(
-        current,
-        goal,
-        years,
+      // Build query for goal planning
+      const query = `Plan goal: current value $${current}, goal amount $${goal}, timeframe ${years} years, risk appetite ${riskAppetite}, expected return ${returnRate}%`;
+
+      // Use orchestration service to go through LangGraph router
+      const result = await orchestrationService.sendMessage(
+        query,
         undefined,
-        riskAppetite,
-        returnRate
+        []
       );
 
       setPlan(result);
 
-      // Update LangGraph execution state for StateGraph display
-      const executionMetrics: ExecutionMetrics = {
-        confidence: result.confidence ?? 0.8,
-        intent: result.intent ?? 'goal_planning',
-        agentsUsed: result.agents_used ?? ['goal_planning'],
-        executionTimes: result.execution_times ?? {},
-        totalTimeMs: result.total_time_ms ?? 0,
-      };
-
+      // Update LangGraph execution state with full metadata from orchestration
       langgraphStore.setExecution({
-        ...executionMetrics,
+        confidence: result.confidence || 0.8,
+        intent: result.intent,
+        agentsUsed: result.agents_used || [],
+        executionTimes: result.execution_times || {},
+        totalTimeMs: result.total_time_ms || 0,
+        metadata: result.metadata, // ✅ INCLUDES execution_details and workflow_analysis
         message: result.message,
         timestamp: new Date(),
       });
@@ -71,7 +68,7 @@ export function GoalPlanningView() {
       setError(errorMsg);
     } finally {
       setLoading(false);
-      langgraphStore.setLoading(false);  // Clear LangGraph store loading state
+      langgraphStore.setLoading(false);
     }
   };
 

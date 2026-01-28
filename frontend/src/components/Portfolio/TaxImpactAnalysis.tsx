@@ -1,6 +1,6 @@
 import { FC, useMemo, useEffect, useState } from 'react'
 import { usePortfolioStore } from '../../store/portfolioStore'
-import axios from 'axios'
+import { orchestrationService } from '../../services/orchestrationService'
 
 interface Holding {
   ticker: string

@@ -75,7 +75,17 @@ async def analyze_portfolio(request: PortfolioAnalysisRequest) -> AgentResponse:
         
         # Create user message with portfolio context
         holdings_summary = ", ".join([f"{h.ticker} ({h.quantity} shares @ ${h.current_price})" for h in request.holdings])
-        user_message = f"Analyze portfolio: {holdings_summary}. Analysis type: {request.analysis_type or 'full'}"
+        
+        # Build message with analysis type keywords to help router detect correct intent
+        analysis_type = request.analysis_type or 'full'
+        if analysis_type == 'allocation':
+            user_message = f"Analyze my portfolio allocation: {holdings_summary}"
+        elif analysis_type == 'diversification':
+            user_message = f"Analyze portfolio diversification: {holdings_summary}"
+        elif analysis_type == 'rebalance':
+            user_message = f"Analyze portfolio rebalancing strategy: {holdings_summary}"
+        else:
+            user_message = f"Perform portfolio analysis: {holdings_summary}"
         
         # Route through LangGraph orchestrator
         try:

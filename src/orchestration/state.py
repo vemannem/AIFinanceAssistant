@@ -224,18 +224,24 @@ INTENT_KEYWORDS = {
     Intent.TAX_QUESTION: [
         "tax", "capital gains", "ira", "401k", "roth",
         "deductible", "harvesting", "dividend tax", "tax strategy",
-        "tax loss", "tax efficient"
+        "tax loss", "tax efficient", "tax liability", "tax planning",
+        "wash sale", "tax impact", "taxes", "tax advice"
     ],
     Intent.PORTFOLIO_ANALYSIS: [
-        "analyze portfolio", "portfolio allocation", "diversification",
-        "my holdings", "my portfolio", "concentration", "rebalance", "position",
-        "allocation percentage", "analyze", "my stocks", "my shares"
+        "portfolio allocation", "diversification", "portfolio",
+        "my holdings", "concentration", "rebalance", "position",
+        "allocation percentage", "my stocks", "my shares", "holdings",
+        "perform portfolio analysis", "analyze my portfolio",
+        "allocation strategy", "portfolio allocation analysis", "portfolio diversification",
+        "portfolio rebalancing", "analyze portfolio", "portfolio review"
     ],
     Intent.MARKET_ANALYSIS: [
         "price of", "quote", "stock price", "market data",
         "historical", "trend", "fundamentals", "compare",
         "current price", "trading at", "what is the price",
-        "market analysis", "stock analysis", "ticker", "symbol"
+        "market analysis", "stock analysis", "ticker", "symbol",
+        "price data", "stock quote", "analyze for price", "market",
+        "stock", "analyze market"
     ],
     Intent.NEWS_ANALYSIS: [
         "news", "sentiment", "headlines", "market condition",

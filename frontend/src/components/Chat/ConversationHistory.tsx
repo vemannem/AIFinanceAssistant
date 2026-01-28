@@ -7,6 +7,7 @@ interface Conversation {
   messageCount: number
   timestamp: string
   tags: string[]
+  messages?: Array<{ role: string; content: string }>
 }
 
 /**
@@ -20,46 +21,90 @@ export const ConversationHistory: FC = () => {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const store = useChatStore()
 
-  // Load conversations from localStorage on mount
+  // Load conversations from both localStorage and backend on mount
   useEffect(() => {
     loadConversations()
   }, [])
 
-  const loadConversations = () => {
+  const loadConversations = async () => {
     setIsLoading(true)
     try {
-      // Simulate API call - in production, call /api/chat/history
-      const savedConversations = localStorage.getItem('conversations')
-      const parsed = savedConversations ? JSON.parse(savedConversations) : []
-      setConversations(parsed)
+      // Try to fetch from backend first
+      const response = await fetch('http://localhost:8000/api/chat/history')
+      if (response.ok) {
+        const data = await response.json()
+        const conversations = data.sessions || []
+        setConversations(conversations)
+        // Also update localStorage with backend data
+        localStorage.setItem('conversations', JSON.stringify(conversations))
+      } else {
+        // Fallback to localStorage if backend fails
+        const savedConversations = localStorage.getItem('conversations')
+        const parsed = savedConversations ? JSON.parse(savedConversations) : []
+        setConversations(parsed)
+      }
     } catch (error) {
-      console.error('Failed to load conversations:', error)
+      console.error('Failed to load conversations from backend, using localStorage:', error)
+      // Fallback to localStorage
+      try {
+        const savedConversations = localStorage.getItem('conversations')
+        const parsed = savedConversations ? JSON.parse(savedConversations) : []
+        setConversations(parsed)
+      } catch (localStorageError) {
+        console.error('Failed to load conversations:', localStorageError)
+      }
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Save conversation when messages change
+  // Save conversation when messages change (debounced)
   useEffect(() => {
     if (store.messages.length > 0) {
-      saveCurrentConversation()
+      // Debounce saves - only save after 2 seconds of no changes
+      const timer = setTimeout(() => {
+        saveCurrentConversation()
+      }, 2000)
+      return () => clearTimeout(timer)
     }
   }, [store.messages, store.sessionId])
 
-  const saveCurrentConversation = () => {
+  const saveCurrentConversation = async () => {
     const summary = generateSummary()
+    
+    // Convert messages from store format to API format
+    const messages = store.messages.map((msg) => ({
+      role: msg.sender === 'user' ? 'user' : 'assistant',
+      content: msg.text,
+    }))
+    
     const newConversation: Conversation = {
       sessionId: store.sessionId,
       summary,
       messageCount: store.messages.length,
       timestamp: new Date().toISOString(),
       tags: extractTags(summary),
+      messages,
     }
 
     const existing = conversations.filter((c) => c.sessionId !== store.sessionId)
     const updated = [newConversation, ...existing]
     setConversations(updated)
+    
+    // Save to localStorage
     localStorage.setItem('conversations', JSON.stringify(updated))
+    
+    // Also save to backend
+    try {
+      await fetch('http://localhost:8000/api/chat/history/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConversation)
+      })
+    } catch (error) {
+      console.warn('Failed to save conversation to backend:', error)
+      // Continue anyway, localStorage is still working
+    }
   }
 
   const generateSummary = (): string => {
@@ -85,10 +130,20 @@ export const ConversationHistory: FC = () => {
       conv.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
-  const deleteConversation = (sessionId: string) => {
+  const deleteConversation = async (sessionId: string) => {
     const updated = conversations.filter((c) => c.sessionId !== sessionId)
     setConversations(updated)
     localStorage.setItem('conversations', JSON.stringify(updated))
+    
+    // Also delete from backend
+    try {
+      await fetch(`http://localhost:8000/api/chat/history/${sessionId}`, {
+        method: 'DELETE'
+      })
+    } catch (error) {
+      console.warn('Failed to delete conversation from backend:', error)
+      // Continue anyway, localStorage is still working
+    }
   }
 
   const loadConversation = (sessionId: string) => {

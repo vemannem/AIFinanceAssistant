@@ -13,11 +13,31 @@ from src.core.config import Config
 logger = get_logger(__name__, Config.LOG_LEVEL)
 router = APIRouter()
 
+# In-memory storage for conversation history (for MVP)
+# In production, use database (PostgreSQL, MongoDB, etc.)
+CONVERSATION_HISTORY_STORE = {}
+
 
 class ChatMessage(BaseModel):
     """Chat message."""
     role: str  # "user" or "assistant"
     content: str
+
+
+class ConversationEntry(BaseModel):
+    """Single conversation entry in history."""
+    sessionId: str
+    summary: str
+    messageCount: int
+    timestamp: str
+    tags: List[str] = []
+    messages: List[ChatMessage] = []
+
+
+class ConversationHistoryResponse(BaseModel):
+    """Response containing all conversations for a session."""
+    sessions: List[ConversationEntry]
+    total_count: int
 
 
 class ChatRequest(BaseModel):
@@ -164,9 +184,17 @@ async def orchestration_chat(request: OrchestrationRequest) -> ChatResponse:
                 "agent": "langgraph_orchestrator",
                 "tools_used": result.get("metadata", {}).get("tools_used", []),
                 "workflow_state": "complete",
+                # Include execution details
+                "execution_details": result.get("execution_details", []),
+                "workflow_analysis": result.get("workflow_state", {}),
+                "detected_intents": result.get("workflow_state", {}).get("detected_intents", []),
+                "extracted_tickers": result.get("workflow_state", {}).get("extracted_tickers", []),
+                "execution_errors": result.get("workflow_state", {}).get("execution_errors", []),
             }
             
             logger.info(f"[{session_id}] LangGraph orchestrator executed successfully | Agents: {agents_used}")
+            logger.info(f"[{session_id}] Metadata execution_details: {metadata.get('execution_details', [])}")
+            logger.info(f"[{session_id}] Metadata workflow_analysis: {metadata.get('workflow_analysis', {})}")
             
         except Exception as lg_error:
             # Fallback to FinanceQAAgent if LangGraph fails
@@ -203,6 +231,9 @@ async def orchestration_chat(request: OrchestrationRequest) -> ChatResponse:
         # Calculate total execution time
         total_time_ms = (time.time() - start_time) * 1000
         
+        logger.info(f"[{session_id}] Building ChatResponse with metadata keys: {list(metadata.keys())}")
+        logger.info(f"[{session_id}] Metadata execution_details: {metadata.get('execution_details', 'NOT FOUND')}")
+        
         response = ChatResponse(
             session_id=session_id,
             message=message,
@@ -217,9 +248,122 @@ async def orchestration_chat(request: OrchestrationRequest) -> ChatResponse:
         )
         
         logger.info(f"[{session_id}] Orchestration chat response generated | Agents: {agents_used} | Time: {total_time_ms:.0f}ms")
+        logger.info(f"[{session_id}] Response metadata in ChatResponse: {response.metadata}")
         return response
         
         
     except Exception as e:
         logger.error(f"Orchestration chat endpoint error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===== CONVERSATION HISTORY ENDPOINTS =====
+
+@router.post("/chat/history/save")
+async def save_conversation(conversation: ConversationEntry) -> dict:
+    """
+    Save a conversation to history.
+    
+    Stores chat conversation for later retrieval.
+    """
+    try:
+        session_id = conversation.sessionId
+        
+        # Store in-memory (production: save to database)
+        if session_id not in CONVERSATION_HISTORY_STORE:
+            CONVERSATION_HISTORY_STORE[session_id] = []
+        
+        CONVERSATION_HISTORY_STORE[session_id].append(conversation.dict())
+        
+        logger.info(f"Saved conversation {session_id} with {conversation.messageCount} messages")
+        
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "message": "Conversation saved"
+        }
+    except Exception as e:
+        logger.error(f"Error saving conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/history")
+async def get_conversation_history(limit: int = 50) -> ConversationHistoryResponse:
+    """
+    Get all saved conversations.
+    
+    Retrieves conversation history for the current user.
+    """
+    try:
+        all_conversations = []
+        
+        # Flatten history store (in-memory for MVP)
+        for session_id, conversations in CONVERSATION_HISTORY_STORE.items():
+            all_conversations.extend(conversations)
+        
+        # Sort by timestamp (newest first) and limit
+        sorted_conversations = sorted(
+            all_conversations,
+            key=lambda x: x.get("timestamp", ""),
+            reverse=True
+        )[:limit]
+        
+        # Convert to ConversationEntry objects
+        entries = [ConversationEntry(**conv) for conv in sorted_conversations]
+        
+        logger.info(f"Retrieved {len(entries)} conversations from history")
+        
+        return ConversationHistoryResponse(
+            sessions=entries,
+            total_count=len(all_conversations)
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving conversation history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/history/{session_id}")
+async def get_session_conversations(session_id: str) -> ConversationHistoryResponse:
+    """
+    Get conversations for a specific session.
+    """
+    try:
+        conversations = CONVERSATION_HISTORY_STORE.get(session_id, [])
+        
+        entries = [ConversationEntry(**conv) for conv in conversations]
+        
+        logger.info(f"Retrieved {len(entries)} conversations for session {session_id}")
+        
+        return ConversationHistoryResponse(
+            sessions=entries,
+            total_count=len(entries)
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving session history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/chat/history/{session_id}")
+async def delete_session_history(session_id: str) -> dict:
+    """
+    Delete all conversations for a session.
+    """
+    try:
+        if session_id in CONVERSATION_HISTORY_STORE:
+            count = len(CONVERSATION_HISTORY_STORE[session_id])
+            del CONVERSATION_HISTORY_STORE[session_id]
+            logger.info(f"Deleted {count} conversations for session {session_id}")
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "deleted_count": count
+            }
+        else:
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "deleted_count": 0,
+                "message": "Session not found"
+            }
+    except Exception as e:
+        logger.error(f"Error deleting session history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

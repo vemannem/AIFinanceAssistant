@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { agentsService } from '@/services/agentsService';
+import { orchestrationService } from '@/services/orchestrationService';
 import { useLangGraphStore } from '@/store/langgraphStore';
-import { ExecutionMetrics } from '@/types';
 
 export function MarketAnalysisView() {
   const langgraphStore = useLangGraphStore();
@@ -15,7 +14,7 @@ export function MarketAnalysisView() {
     try {
       setLoading(true);
       setError(null);
-      langgraphStore.setLoading(true);  // Set LangGraph store loading state
+      langgraphStore.setLoading(true);
 
       const tickerList = tickers
         .split(',')
@@ -27,25 +26,27 @@ export function MarketAnalysisView() {
         return;
       }
 
-      const result = await agentsService.analyzeMarket(
-        tickerList,
+      // Build query string for market analysis
+      const analysisTypeText = analysisType === 'quote' ? 'price' : analysisType;
+      const query = `Analyze ${tickerList.join(', ')} for ${analysisTypeText} data`;
+
+      // Use orchestration service to go through LangGraph router
+      const result = await orchestrationService.sendMessage(
+        query,
         undefined,
-        analysisType
+        []
       );
 
       setAnalysis(result);
 
-      // Update LangGraph execution state for StateGraph display
-      const executionMetrics: ExecutionMetrics = {
-        confidence: result.confidence ?? 0.8,
-        intent: result.intent ?? 'market_analysis',
-        agentsUsed: result.agents_used ?? ['market_analysis'],
-        executionTimes: result.execution_times ?? {},
-        totalTimeMs: result.total_time_ms ?? 0,
-      };
-
+      // Update LangGraph execution state with full metadata from orchestration
       langgraphStore.setExecution({
-        ...executionMetrics,
+        confidence: result.confidence || 0.8,
+        intent: result.intent,
+        agentsUsed: result.agents_used || [],
+        executionTimes: result.execution_times || {},
+        totalTimeMs: result.total_time_ms || 0,
+        metadata: result.metadata, // ✅ INCLUDES execution_details and workflow_analysis from LangGraph
         message: result.message,
         timestamp: new Date(),
       });
@@ -54,7 +55,7 @@ export function MarketAnalysisView() {
       setError(errorMsg);
     } finally {
       setLoading(false);
-      langgraphStore.setLoading(false);  // Clear LangGraph store loading state
+      langgraphStore.setLoading(false);
     }
   };
 

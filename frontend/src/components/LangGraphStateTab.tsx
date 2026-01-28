@@ -25,6 +25,7 @@ const LangGraphStateTab: React.FC<LangGraphStateTabProps> = ({ loading }) => {
     agentsUsed: lastExecution.agentsUsed,
     executionTimes: lastExecution.executionTimes,
     totalTimeMs: lastExecution.totalTimeMs,
+    metadata: lastExecution.metadata, // ✅ INCLUDE METADATA with execution_details and workflow_analysis
   } as ExecutionMetrics : undefined;
 
   // Show loading state with progress indicator
@@ -331,18 +332,167 @@ const LangGraphStateTab: React.FC<LangGraphStateTabProps> = ({ loading }) => {
               )}
             </div>
 
-            {/* Metadata */}
-            {execution.metadata && Object.keys(execution.metadata).length > 0 && (
+            {/* Workflow Analysis - From LangGraph State */}
+            {execution.metadata?.workflow_analysis && Object.keys(execution.metadata.workflow_analysis).length > 0 && (
               <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
                 <button
                   onClick={() => setExpandedIndex(expandedIndex === 4 ? null : 4)}
                   className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
                 >
-                  <h3 className="font-semibold text-gray-900">Additional Metadata</h3>
+                  <div className="flex items-center gap-3">
+                    <AlertCircle size={20} className="text-cyan-600" />
+                    <h3 className="font-semibold text-gray-900">Workflow Analysis</h3>
+                    <span className="ml-2 inline-block bg-cyan-100 text-cyan-800 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                      State Data
+                    </span>
+                  </div>
                   {expandedIndex === 4 ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                 </button>
 
                 {expandedIndex === 4 && (
+                  <div className="border-t border-gray-200 px-6 py-4">
+                    <div className="space-y-4">
+                      {/* Detected Intents */}
+                      {execution.metadata.workflow_analysis.detected_intents && execution.metadata.workflow_analysis.detected_intents.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Detected Intents</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {execution.metadata.workflow_analysis.detected_intents.map((intent: string, idx: number) => (
+                              <span
+                                key={idx}
+                                className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium"
+                              >
+                                {intent.replace(/_/g, ' ')}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Primary Intent */}
+                      {execution.metadata.workflow_analysis.primary_intent && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Primary Intent</h4>
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                            <span className="text-indigo-900 font-medium">
+                              {execution.metadata.workflow_analysis.primary_intent.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Extracted Tickers */}
+                      {execution.metadata.workflow_analysis.extracted_tickers && execution.metadata.workflow_analysis.extracted_tickers.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Extracted Tickers</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {execution.metadata.workflow_analysis.extracted_tickers.map((ticker: string, idx: number) => (
+                              <span
+                                key={idx}
+                                className="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-bold font-mono"
+                              >
+                                {ticker}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Execution Errors */}
+                      {execution.metadata.workflow_analysis.execution_errors && execution.metadata.workflow_analysis.execution_errors.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-red-700 mb-2">Execution Errors</h4>
+                          <div className="space-y-2">
+                            {execution.metadata.workflow_analysis.execution_errors.map((error: string, idx: number) => (
+                              <div key={idx} className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                <span className="text-red-900 text-sm">{error}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Execution Details Report */}
+            {execution.metadata?.execution_details && Array.isArray(execution.metadata.execution_details) && execution.metadata.execution_details.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                <button
+                  onClick={() => setExpandedIndex(expandedIndex === 5 ? null : 5)}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckCircle size={20} className="text-emerald-600" />
+                    <h3 className="font-semibold text-gray-900">Agent Execution Details</h3>
+                    <span className="ml-2 inline-block bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                      {execution.metadata.execution_details.length}
+                    </span>
+                  </div>
+                  {expandedIndex === 5 ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                </button>
+
+                {expandedIndex === 5 && (
+                  <div className="border-t border-gray-200 px-6 py-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                            <th className="text-left px-3 py-2 font-semibold text-gray-700">Agent</th>
+                            <th className="text-left px-3 py-2 font-semibold text-gray-700">Status</th>
+                            <th className="text-right px-3 py-2 font-semibold text-gray-700">Time (ms)</th>
+                            <th className="text-left px-3 py-2 font-semibold text-gray-700">Error</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {execution.metadata.execution_details.map((detail: any, idx: number) => (
+                            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="px-3 py-3 font-medium text-gray-900 capitalize">
+                                {detail.agent_name?.replace(/_/g, ' ')}
+                              </td>
+                              <td className="px-3 py-3">
+                                <span className={`inline-block px-2 py-1 rounded-full text-xs font-bold ${
+                                  detail.status === 'success'
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {detail.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-right font-mono text-gray-900">
+                                {detail.execution_time_ms?.toFixed(2) || 'N/A'}
+                              </td>
+                              <td className="px-3 py-3 text-red-600 text-xs">
+                                {detail.error ? (
+                                  <span title={detail.error}>{detail.error.substring(0, 30)}...</span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Metadata */}
+            {execution.metadata && Object.keys(execution.metadata).length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                <button
+                  onClick={() => setExpandedIndex(expandedIndex === 6 ? null : 6)}
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                >
+                  <h3 className="font-semibold text-gray-900">Raw Metadata</h3>
+                  {expandedIndex === 6 ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                </button>
+
+                {expandedIndex === 6 && (
                   <div className="border-t border-gray-200 px-6 py-4">
                     <pre className="bg-gray-100 p-4 rounded text-xs overflow-auto max-h-64 text-gray-700">
                       {JSON.stringify(execution.metadata, null, 2)}

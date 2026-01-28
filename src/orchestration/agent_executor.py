@@ -82,8 +82,21 @@ class AgentExecutor:
             if context.get("timeframe"):
                 agent_input += f"\n[Context: Timeframe: {context['timeframe']}]"
             
-            # Execute agent using execute() method
-            output = await agent.execute(agent_input)
+            # Build query_data for agents that need structured data
+            query_data = None
+            if agent_type in [AgentType.MARKET_ANALYSIS, AgentType.PORTFOLIO_ANALYSIS, AgentType.GOAL_PLANNING]:
+                query_data = {
+                    "tickers": context.get("tickers", []),
+                    "amounts": context.get("amounts"),
+                    "timeframe": context.get("timeframe"),
+                    "conversation_history": context.get("conversation_history", []),
+                }
+            
+            # Execute agent using execute() method with query_data if needed
+            if query_data is not None:
+                output = await agent.execute(agent_input, query_data=query_data)
+            else:
+                output = await agent.execute(agent_input)
             
             execution_time = (time.time() - start_time) * 1000
             

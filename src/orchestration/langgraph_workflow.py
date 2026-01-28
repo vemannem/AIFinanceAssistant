@@ -339,43 +339,63 @@ class LangGraphOrchestrator:
     
     async def _node_router(self, state: LangGraphState) -> LangGraphState:
         """
-        Router node: Uses LLM to intelligently select the BEST agent
-        
-        This is the router agent pattern - calls OpenAI to decide which agent
-        is most suitable for the user's intent, rather than using hardcoded rules.
+        Router node: Uses detected intent first, LLM as fallback
         
         Responsibilities:
-        - Call LLM to analyze intent and context
+        - Use detected intent for routing (primary path)
+        - Fall back to LLM only for ambiguous cases
         - Select ONE best agent for this query
         - Provide routing rationale
         """
-        logger.info("[ROUTER] Starting LLM-based routing...")
+        logger.info("[ROUTER] Starting routing...")
         
         try:
             # Skip if guardrails failed
             if not state.get("input_validated"):
-                state["selected_agent"] = "finance_qa"  # Fallback
-                state["routing_rationale"] = "Guardrail blocked input, using fallback agent"
-                logger.warning("[ROUTER] ⚠ Input not validated, using fallback")
+                # Use intent-based fallback instead of always using finance_qa
+                state["selected_agent"] = self._get_agent_from_intent(state.get("primary_intent", "unknown"))
+                state["routing_rationale"] = "Guardrail blocked input, using intent-based fallback"
+                logger.warning(f"[ROUTER] ⚠ Input not validated, using intent-based fallback: {state['selected_agent']}")
                 return state
             
-            # Build router prompt for LLM
-            router_prompt = f"""You are a financial assistant router. Based on the user's question and detected intent, select the SINGLE BEST agent to handle this query.
+            primary_intent = state.get("primary_intent", "unknown").lower()
+            
+            # FIRST: Try to get agent from detected intent (HIGH PRIORITY)
+            # This avoids unnecessary LLM calls for well-detected intents
+            intent_based_agent = self._get_agent_from_intent(primary_intent)
+            
+            # If intent was clearly detected (not unknown), use intent-based routing
+            if primary_intent != "unknown" and intent_based_agent != "finance_qa":
+                state["selected_agent"] = intent_based_agent
+                state["selected_agents"] = [intent_based_agent]
+                state["routing_rationale"] = f"Intent-based routing: {primary_intent} → {intent_based_agent}"
+                logger.info(f"[ROUTER] ✓ Intent-based routing: {primary_intent} → {intent_based_agent}")
+                return state
+            
+            # SECOND: For ambiguous/unknown intents, use LLM as fallback
+            logger.info("[ROUTER] Intent ambiguous/unknown, using LLM for intelligent routing...")
+            
+            # Build router prompt for LLM with STRICT FORMAT requirement
+            router_prompt = f"""You are a financial assistant router. Your task is to select exactly ONE agent to handle the user's question.
 
 User Question: {state['user_input']}
 Detected Intents: {', '.join(state.get('detected_intents', ['unknown']))}
 Primary Intent: {state.get('primary_intent', 'unknown')}
 Extracted Tickers: {', '.join(state.get('extracted_tickers', [])) or 'None'}
 
-Available Agents:
-1. finance_qa - General finance education, explanations, advice
-2. portfolio - Portfolio analysis, allocation, diversification, rebalancing
-3. market - Real-time stock data, quotes, market analysis, trends
-4. goal - Financial goal planning, retirement calculations, projections
-5. tax - Tax planning, tax strategies, tax education
-6. news - Financial news synthesis, market news, updates
+Available Agents (respond with EXACTLY ONE of these):
+- finance_qa (for general financial education, Q&A, advice)
+- portfolio (for portfolio analysis, allocation, rebalancing)
+- market (for stock prices, market data, trends, quotes)
+- goal (for financial goals, retirement planning, projections)
+- tax (for tax planning, strategies, tax education)
+- news (for financial news, market updates, news synthesis)
 
-Respond with ONLY the agent name (no explanation). Choose from: finance_qa, portfolio, market, goal, tax, or news."""
+CRITICAL: Respond with ONLY the agent name, nothing else.
+Do NOT add explanation, examples, or extra text.
+Choose EXACTLY ONE from the list above.
+
+Response:"""
 
             # Call LLM router
             client = AsyncOpenAI(api_key=Config.OPENAI_API_KEY)
@@ -383,32 +403,157 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
             response = await client.chat.completions.create(
                 model=Config.OPENAI_MODEL,
                 messages=[{"role": "user", "content": router_prompt}],
-                temperature=0.2,  # Lower temperature for consistent routing
-                max_tokens=20
+                temperature=0.1,  # Even lower temperature for strict format adherence
+                max_tokens=10  # Limit tokens to just agent name
             )
             
             selected = response.choices[0].message.content.strip().lower()
             
-            # Validate agent name
+            logger.info(f"[ROUTER] LLM response: '{selected}' | Intent: {state.get('primary_intent')} | Tickers: {state.get('extracted_tickers', [])}")
+            
+            # Validate and extract agent name with improved logic
             valid_agents = ["finance_qa", "portfolio", "market", "goal", "tax", "news"]
-            if selected not in valid_agents:
-                selected = "finance_qa"  # Fallback to finance_qa
-                logger.warning(f"[ROUTER] Invalid agent '{selected}', using fallback")
+            matched_agent = self._extract_agent_from_response(selected, valid_agents, state.get("primary_intent", "unknown"))
             
-            state["selected_agent"] = selected
-            state["selected_agents"] = [selected]  # For backward compatibility
-            state["routing_rationale"] = f"LLM router selected: {selected} | Intent: {state.get('primary_intent', 'unknown')}"
+            state["selected_agent"] = matched_agent
+            state["selected_agents"] = [matched_agent]  # For backward compatibility
+            state["routing_rationale"] = f"LLM router selected: {matched_agent} | Intent: {state.get('primary_intent', 'unknown')}"
             
-            logger.info(f"[ROUTER] ✓ Selected agent: {selected}")
+            logger.info(f"[ROUTER] ✓ Selected agent: {matched_agent} (from LLM: '{selected}')")
             
         except Exception as e:
-            logger.error(f"[ROUTER] ✗ Error during routing: {str(e)}")
-            state["selected_agent"] = "finance_qa"  # Fallback
-            state["selected_agents"] = ["finance_qa"]
-            state["routing_rationale"] = f"Routing error, using fallback: {str(e)}"
+            logger.error(f"[ROUTER] ✗ Error during routing: {str(e)}", exc_info=True)
+            # Use intent-based fallback instead of hardcoded finance_qa
+            fallback_agent = self._get_agent_from_intent(state.get("primary_intent", "unknown"))
+            state["selected_agent"] = fallback_agent
+            state["selected_agents"] = [fallback_agent]
+            state["routing_rationale"] = f"Routing error, using intent-based fallback: {str(e)}"
             state["execution_errors"].append(f"Router error: {str(e)}")
+            logger.info(f"[ROUTER] Used intent-based fallback: {fallback_agent}")
         
         return state
+    
+    def _extract_agent_from_response(self, response: str, valid_agents: list, primary_intent: str) -> str:
+        """
+        Extract agent name from LLM response with improved logic
+        
+        Args:
+            response: Raw LLM response text
+            valid_agents: List of valid agent names
+            primary_intent: The detected primary intent
+            
+        Returns:
+            Selected agent name
+        """
+        response_lower = response.lower().strip()
+        
+        # 1. Try exact match first
+        if response_lower in valid_agents:
+            logger.info(f"[ROUTER] Exact match found: {response_lower}")
+            return response_lower
+        
+        # 2. Try substring matching with valid agents
+        for agent in valid_agents:
+            if agent in response_lower:
+                logger.info(f"[ROUTER] Extracted '{agent}' from response: '{response}'")
+                return agent
+        
+        # 3. Try to find agent keywords even with extra text
+        agent_keywords = {
+            "finance_qa": ["finance", "education", "qa", "question", "answer"],
+            "portfolio": ["portfolio", "allocation", "rebalancing", "holdings"],
+            "market": ["market", "stock", "price", "quote", "data"],
+            "goal": ["goal", "planning", "retirement", "projections", "savings"],
+            "tax": ["tax", "planning", "strategy"],
+            "news": ["news", "updates", "synthesis"],
+        }
+        
+        for agent, keywords in agent_keywords.items():
+            for keyword in keywords:
+                if keyword in response_lower:
+                    logger.info(f"[ROUTER] Matched keyword '{keyword}' to agent: {agent}")
+                    return agent
+        
+        # 4. Fallback to intent-based selection
+        fallback_agent = self._get_agent_from_intent(primary_intent)
+        logger.warning(f"[ROUTER] Could not extract agent from response, using intent-based fallback: {fallback_agent}")
+        return fallback_agent
+    
+    def _get_agent_from_intent(self, primary_intent: str) -> str:
+        """
+        Select agent based on detected intent (instead of always defaulting to finance_qa)
+        
+        Args:
+            primary_intent: The detected primary intent
+            
+        Returns:
+            Agent name that matches the intent
+        """
+        intent_lower = primary_intent.lower()
+        
+        # Map intents to agents with EXACT matching (prefer exact over substring)
+        intent_to_agent = {
+            "market_analysis": "market",
+            "market": "market",
+            
+            "portfolio_analysis": "portfolio",
+            "portfolio": "portfolio",
+            
+            "goal_planning": "goal",
+            "goal": "goal",
+            
+            "tax_question": "tax",
+            "tax": "tax",
+            
+            "news_analysis": "news",
+            "news": "news",
+            
+            "education_question": "finance_qa",
+            "financial_education": "finance_qa",
+        }
+        
+        # Try exact match FIRST (best precision)
+        if intent_lower in intent_to_agent:
+            agent = intent_to_agent[intent_lower]
+            logger.info(f"[ROUTER] Intent exact match: {primary_intent} → {agent}")
+            return agent
+        
+        # Try substring match for flexibility
+        substring_patterns = {
+            "market": "market",
+            "price": "market",
+            "quote": "market",
+            "stock": "market",
+            
+            "portfolio": "portfolio",
+            "allocation": "portfolio",
+            "diversif": "portfolio",
+            "rebalanc": "portfolio",
+            "holdings": "portfolio",
+            
+            "goal": "goal",
+            "retirement": "goal",
+            "saving": "goal",
+            
+            "tax": "tax",
+            "capital gain": "tax",
+            "harvesting": "tax",
+            
+            "news": "news",
+            "sentiment": "news",
+            
+            "education": "finance_qa",
+            "question": "finance_qa",
+        }
+        
+        for pattern, agent in substring_patterns.items():
+            if pattern in intent_lower:
+                logger.info(f"[ROUTER] Intent substring match ('{pattern}'): {primary_intent} → {agent}")
+                return agent
+        
+        # Default fallback (only if no intent match at all)
+        logger.warning(f"[ROUTER] No intent match for '{primary_intent}', using finance_qa as final fallback")
+        return "finance_qa"
     
     def _route_to_agent(self, state: LangGraphState) -> str:
         """
@@ -492,12 +637,19 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
             state["agent_executions"].append(execution_record)
             state["execution_times"][agent_name] = execution_result.get("execution_time_ms", 0)
             
+            # Also track in selected_agents for consistency
+            if agent_name not in state.get("selected_agents", []):
+                if "selected_agents" not in state:
+                    state["selected_agents"] = []
+                state["selected_agents"].append(agent_name)
+            
             if execution_result.get("status") == "error":
                 error_msg = f"{agent_name}: {execution_result.get('error', 'Unknown error')}"
                 state["execution_errors"].append(error_msg)
                 logger.error(f"[AGENT_{agent_name.upper()}] ✗ {error_msg}")
             else:
                 logger.info(f"[AGENT_{agent_name.upper()}] ✓ Completed in {execution_result.get('execution_time_ms', 0):.1f}ms")
+                logger.debug(f"[AGENT_{agent_name.upper()}] Execution record added. Total agents executed: {len(state.get('agent_executions', []))}")
         
         except Exception as e:
             logger.error(f"[AGENT_{agent_name.upper()}] ✗ Exception: {str(e)}", exc_info=True)
@@ -517,18 +669,49 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
         - Collect citations
         """
         logger.info("[SYNTHESIS] Synthesizing final response with guardrails...")
+        logger.debug(f"[SYNTHESIS] State received with {len(state.get('agent_executions', []))} agent executions")
         
         try:
-            # Use FinanceQA as primary synthesis
-            from src.agents.finance_qa import FinanceQAAgent
+            # Check if we have agent execution results to synthesize
+            agent_executions = state.get("agent_executions", [])
             
-            agent = FinanceQAAgent()
-            output = await agent.execute(
-                user_message=state["user_input"],
-                conversation_context=None,
-            )
-            
-            response_text = output.answer_text
+            if agent_executions and agent_executions[0].get("status") == "success":
+                # Use the agent's output directly if it executed successfully
+                agent_output = agent_executions[0].get("output", {})
+                
+                # Extract response text from the agent output
+                if hasattr(agent_output, "answer_text"):
+                    response_text = agent_output.answer_text
+                elif isinstance(agent_output, dict) and "answer_text" in agent_output:
+                    response_text = agent_output["answer_text"]
+                else:
+                    # Fallback to FinanceQA if output format is unexpected
+                    from src.agents.finance_qa import FinanceQAAgent
+                    qa_agent = FinanceQAAgent()
+                    qa_output = await qa_agent.execute(
+                        user_message=state["user_input"],
+                        conversation_context=None,
+                    )
+                    response_text = qa_output.answer_text
+                
+                # Extract citations if available
+                citations = []
+                if hasattr(agent_output, "citations"):
+                    citations = agent_output.citations
+                elif isinstance(agent_output, dict) and "citations" in agent_output:
+                    citations = agent_output["citations"]
+            else:
+                # Use FinanceQA as fallback if no agent results
+                from src.agents.finance_qa import FinanceQAAgent
+                
+                qa_agent = FinanceQAAgent()
+                qa_output = await qa_agent.execute(
+                    user_message=state["user_input"],
+                    conversation_context=None,
+                )
+                
+                response_text = qa_output.answer_text
+                citations = qa_output.citations
             
             # GUARDRAILS: Output Safety Validation (PII in response)
             try:
@@ -557,11 +740,11 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
             state["final_response"] = response_text
             state["citations"] = [
                 {
-                    "title": c.get("title", ""),
-                    "source_url": c.get("source_url", ""),
-                    "category": c.get("category", "")
+                    "title": c.get("title", "") if isinstance(c, dict) else getattr(c, "title", ""),
+                    "source_url": c.get("source_url", "") if isinstance(c, dict) else getattr(c, "source_url", ""),
+                    "category": c.get("category", "") if isinstance(c, dict) else getattr(c, "category", "")
                 }
-                for c in output.citations
+                for c in citations
             ]
             state["confidence"] = 0.85
             
@@ -577,6 +760,8 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
             }
             
             logger.info("[SYNTHESIS] ✓ Response synthesized with guardrails applied")
+            logger.info(f"[SYNTHESIS] Agent executions in state: {len(state.get('agent_executions', []))}")
+            logger.debug(f"[SYNTHESIS] Agent executions detail: {state.get('agent_executions', [])}")
         
         except Exception as e:
             logger.error(f"[SYNTHESIS] ✗ Error during synthesis: {str(e)}")
@@ -664,6 +849,24 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
             f"Session: {final_state['session_id']}"
         )
         
+        # Log final state for debugging
+        logger.info(
+            f"[ORCHESTRATOR] Final state: agent_executions={len(final_state.get('agent_executions', []))} | "
+            f"selected_agents={final_state.get('selected_agents', [])} | "
+            f"final_response_length={len(final_state.get('final_response', ''))}"
+        )
+        
+        # Prepare detailed execution report
+        execution_report = []
+        for execution in final_state.get("agent_executions", []):
+            execution_report.append({
+                "agent_name": execution.get("agent", "unknown"),
+                "status": execution.get("status", "unknown"),
+                "execution_time_ms": execution.get("execution_time_ms", 0),
+                "error": execution.get("error"),
+                "has_output": bool(execution.get("output"))
+            })
+        
         return {
             "response": final_state.get("final_response", ""),
             "citations": final_state.get("citations", []),
@@ -673,7 +876,15 @@ Respond with ONLY the agent name (no explanation). Choose from: finance_qa, port
             "execution_times": final_state.get("execution_times", {}),
             "total_time_ms": final_state.get("total_execution_time_ms", 0),
             "session_id": final_state.get("session_id"),
-            "metadata": final_state.get("metadata", {})
+            "metadata": final_state.get("metadata", {}),
+            # NEW: Detailed execution information
+            "execution_details": execution_report,
+            "workflow_state": {
+                "detected_intents": final_state.get("detected_intents", []),
+                "primary_intent": final_state.get("primary_intent"),
+                "extracted_tickers": final_state.get("extracted_tickers", []),
+                "execution_errors": final_state.get("execution_errors", [])
+            }
         }
 
 

@@ -37,7 +37,9 @@ const ExecutionDetails: React.FC<ExecutionDetailsProps> = ({
   if (!confidence && !agentsUsed.length && !totalTimeMs) {
     return null;
   }
-
+  // Check if we have execution details in metadata
+  const hasExecutionDetails = metadata?.execution_details && Array.isArray(metadata.execution_details) && metadata.execution_details.length > 0
+  const hasWorkflowAnalysis = metadata?.workflow_analysis && Object.keys(metadata.workflow_analysis).length > 0
   const formatTime = (ms: number): string => {
     if (ms < 1000) return `${ms.toFixed(0)}ms`;
     return `${(ms / 1000).toFixed(2)}s`;
@@ -75,6 +77,11 @@ const ExecutionDetails: React.FC<ExecutionDetailsProps> = ({
         <div className="flex items-center gap-3">
           <Zap size={18} className="text-blue-600" />
           <span className="font-semibold text-gray-800">Execution Details</span>
+          {(hasExecutionDetails || hasWorkflowAnalysis) && (
+            <span className="inline-block px-2 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded">
+              Active
+            </span>
+          )}
           <div className="flex gap-2">
             {confidence > 0 && (
               <span className={`text-xs px-2 py-1 rounded-full border ${getConfidenceColor(confidence)}`}>
@@ -168,6 +175,69 @@ const ExecutionDetails: React.FC<ExecutionDetailsProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Execution Details from LangGraph State */}
+          {metadata?.execution_details && Array.isArray(metadata.execution_details) && metadata.execution_details.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">Agent Execution Report</h4>
+              <div className="space-y-2">
+                {metadata.execution_details.map((detail: any, idx: number) => (
+                  <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {detail.status === 'success' ? (
+                        <CheckCircle size={16} className="text-green-600" />
+                      ) : (
+                        <AlertCircle size={16} className="text-red-600" />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium text-gray-800 capitalize">
+                          {detail.agent_name?.replace(/_/g, ' ')}
+                        </p>
+                        {detail.error && (
+                          <p className="text-xs text-red-600">{detail.error}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-mono text-gray-600">
+                        {formatTime(detail.execution_time_ms)}
+                      </p>
+                      <p className="text-xs text-gray-500 capitalize">
+                        {detail.status}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Workflow Analysis */}
+          {metadata?.workflow_analysis && (
+            <div className="mb-6">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">Workflow Analysis</h4>
+              <div className="space-y-2 bg-gray-100 rounded-lg p-3">
+                {metadata.workflow_analysis.detected_intents && metadata.workflow_analysis.detected_intents.length > 0 && (
+                  <div className="text-xs">
+                    <span className="font-semibold text-gray-700">Detected Intents: </span>
+                    <span className="text-gray-600">{metadata.workflow_analysis.detected_intents.join(', ')}</span>
+                  </div>
+                )}
+                {metadata.workflow_analysis.extracted_tickers && metadata.workflow_analysis.extracted_tickers.length > 0 && (
+                  <div className="text-xs">
+                    <span className="font-semibold text-gray-700">Tickers: </span>
+                    <span className="text-gray-600">{metadata.workflow_analysis.extracted_tickers.join(', ')}</span>
+                  </div>
+                )}
+                {metadata.workflow_analysis.execution_errors && metadata.workflow_analysis.execution_errors.length > 0 && (
+                  <div className="text-xs">
+                    <span className="font-semibold text-red-700">Errors: </span>
+                    <span className="text-red-600">{metadata.workflow_analysis.execution_errors.join(', ')}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

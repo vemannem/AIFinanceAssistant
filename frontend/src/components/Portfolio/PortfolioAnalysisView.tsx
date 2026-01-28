@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
-import { agentsService } from '@/services/agentsService';
+import { orchestrationService } from '@/services/orchestrationService';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useLangGraphStore } from '@/store/langgraphStore';
-import { ExecutionMetrics } from '@/types';
 
 export function PortfolioAnalysisView() {
   const { holdings } = usePortfolioStore();
@@ -22,37 +21,47 @@ export function PortfolioAnalysisView() {
     try {
       setLoading(true);
       setError(null);
-      langgraphStore.setLoading(true);  // Set LangGraph store loading state
+      langgraphStore.setLoading(true);
 
       if (holdings.length === 0) {
         setError('Please add holdings to your portfolio first');
         return;
       }
 
-      const result = await agentsService.analyzePortfolio(
-        holdings.map(h => ({
-          ticker: h.ticker,
-          quantity: h.quantity,
-          current_price: h.currentPrice,
-          cost_basis: h.costBasis,
-        })),
+      // Build query for portfolio analysis with specific keywords based on analysis type
+      const tickerList = holdings.map(h => h.ticker).join(', ');
+      
+      // Create intent-specific messages to help router select correct agent
+      let query: string;
+      if (analysisType === 'allocation' || analysisType === 'diversification' || analysisType === 'rebalance') {
+        query = `Portfolio allocation and diversification analysis for my holdings: ${tickerList}. Analyze allocation percentages, diversification score, and rebalancing recommendations.`;
+      } else if (analysisType === 'tax') {
+        query = `Tax impact analysis for my portfolio holdings: ${tickerList}. Calculate capital gains, tax liability, and tax loss harvesting opportunities.`;
+      } else if (analysisType === 'dividend') {
+        query = `Dividend analysis for my portfolio: ${tickerList}. Calculate dividend yields, income, and dividend growth potential.`;
+      } else if (analysisType === 'full') {
+        query = `Comprehensive portfolio analysis for my holdings: ${tickerList}. Include allocation, diversification, risk assessment, and recommendations.`;
+      } else {
+        query = `Analyze my portfolio with tickers: ${tickerList} for ${analysisType} analysis`;
+      }
+
+      // Use orchestration service to go through LangGraph router
+      const result = await orchestrationService.sendMessage(
+        query,
         undefined,
-        analysisType
+        []
       );
 
       setAnalysis(result);
 
-      // Update LangGraph execution state for StateGraph display
-      const executionMetrics: ExecutionMetrics = {
-        confidence: result.confidence ?? 0.8,
-        intent: result.intent ?? 'portfolio_analysis',
-        agentsUsed: result.agents_used ?? ['portfolio_analysis'],
-        executionTimes: result.execution_times ?? {},
-        totalTimeMs: result.total_time_ms ?? 0,
-      };
-
+      // Update LangGraph execution state with full metadata from orchestration
       langgraphStore.setExecution({
-        ...executionMetrics,
+        confidence: result.confidence || 0.8,
+        intent: result.intent,
+        agentsUsed: result.agents_used || [],
+        executionTimes: result.execution_times || {},
+        totalTimeMs: result.total_time_ms || 0,
+        metadata: result.metadata, // ✅ INCLUDES execution_details and workflow_analysis
         message: result.message,
         timestamp: new Date(),
       });
@@ -61,7 +70,7 @@ export function PortfolioAnalysisView() {
       setError(errorMsg);
     } finally {
       setLoading(false);
-      langgraphStore.setLoading(false);  // Clear LangGraph store loading state
+      langgraphStore.setLoading(false);
     }
   };
 

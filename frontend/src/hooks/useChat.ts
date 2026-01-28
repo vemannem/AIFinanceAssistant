@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useChatStore } from '../store/chatStore'
+import { useLangGraphStore } from '../store/langgraphStore'
 import { orchestrationService } from '../services/orchestrationService'
 import { Message } from '../types'
 import { generateSessionId, generateMessageId } from '../utils/helpers'
@@ -16,6 +17,7 @@ interface UseChat {
 
 export const useChat = (): UseChat => {
   const store = useChatStore()
+  const langgraphStore = useLangGraphStore()
   const [localError, setLocalError] = useState<string | null>(null)
 
   // Initialize session ID if needed
@@ -39,6 +41,13 @@ export const useChat = (): UseChat => {
         setLocalError(null)
         ensureSessionId()
 
+        // Prepare conversation history BEFORE adding current message
+        // This ensures the backend gets the history without the current message
+        const conversationHistory = store.messages.map(msg => ({
+          role: msg.sender as 'user' | 'assistant',
+          content: msg.text,
+        }))
+
         // Add user message immediately
         const userMessage: Message = {
           id: generateMessageId(),
@@ -49,14 +58,12 @@ export const useChat = (): UseChat => {
         store.addMessage(userMessage)
         store.setLoading(true)
 
-        // Call backend orchestration API
+        // Call backend orchestration API with conversation history
+        // (history does not include the current user message)
         const response = await orchestrationService.sendMessage(
           text,
           store.sessionId,
-          store.messages.map(msg => ({
-            role: msg.sender as 'user' | 'assistant',
-            content: msg.text,
-          }))
+          conversationHistory
         )
 
         // Create assistant message from response
@@ -74,7 +81,22 @@ export const useChat = (): UseChat => {
           totalTimeMs: response.total_time_ms || 0,
           metadata: response.metadata,
         }
+        console.log('Full Response:', response)
         console.log('ExecutionData being set:', executionData)
+        console.log('Metadata execution_details:', response.metadata?.execution_details)
+        
+        // Update LangGraph store with latest execution data (including metadata for state display)
+        langgraphStore.setExecution({
+          confidence: response.confidence || 0.8,
+          intent: response.intent,
+          agentsUsed: response.agents_used || [],
+          executionTimes: response.execution_times || {},
+          totalTimeMs: response.total_time_ms || 0,
+          metadata: response.metadata, // INCLUDE FULL METADATA WITH execution_details AND workflow_analysis
+          timestamp: new Date(),
+          message: response.message,
+        })
+        console.log('LangGraph Store Updated:', langgraphStore.getLastExecution())
         
         const assistantMessage: Message = {
           id: generateMessageId(),
